@@ -17,6 +17,11 @@ import { rulesCommand } from './commands/rules';
 import { tagsCommand } from './commands/tags';
 import { networthCommand } from './commands/networth';
 import { goalsCommand } from './commands/goals';
+import { forecastCommand } from './commands/forecast';
+import { portfolioCommand } from './commands/portfolio';
+import { reportsCommand } from './commands/reports';
+import { recapCommand } from './commands/recap';
+import { debtCommand } from './commands/debt';
 
 const program = new Command();
 
@@ -42,5 +47,10 @@ program.addCommand(rulesCommand);
 program.addCommand(tagsCommand);
 program.addCommand(networthCommand);
 program.addCommand(goalsCommand);
+program.addCommand(forecastCommand);
+program.addCommand(portfolioCommand);
+program.addCommand(reportsCommand);
+program.addCommand(recapCommand);
+program.addCommand(debtCommand);
 
 program.parse();
