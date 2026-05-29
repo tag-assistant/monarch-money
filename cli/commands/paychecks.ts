@@ -49,15 +49,14 @@ const PAYCHECKS_LIST_QUERY = `query GetPaychecks {
   }
 }`;
 
-const PAYCHECKS_SUMMARY_QUERY = `query GetPaychecksSummary {
+const PAYCHECKS_SUMMARY_QUERY = `query {
   paychecksSummary {
-    totalGrossPay
-    totalNetPay
+    count
+    totalGross
     totalDeductions
-    paychecksCount
-    averageGrossPay
-    averageNetPay
-    __typename
+    totalNet
+    deductionRate
+    deductionsByType { deductionType totalAmount }
   }
 }`;
 

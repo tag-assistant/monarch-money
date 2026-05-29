@@ -29,80 +29,41 @@ async function runGraphQL(query: string, variables?: Record<string, any>): Promi
   return json.data;
 }
 
-const CASHFLOW_QUERY = `query Common_GetCashFlowDashboard($filters: TransactionFilterInput) {
-  byDay: aggregates(filters: $filters, fillEmptyValues: true, groupBy: ["day"]) {
-    summary { sumExpense __typename }
-    groupBy { day __typename }
-    __typename
-  }
-}`;
-
-const REPORTS_SUMMARY_QUERY = `query Common_GetReportsData($filters: TransactionFilterInput!, $groupBy: [ReportsGroupByEntity!], $includeCategory: Boolean = false, $includeCategoryGroup: Boolean = false, $includeMerchant: Boolean = false, $includeBusinessEntity: Boolean = false, $includeBudgetVariability: Boolean = false, $fillEmptyValues: Boolean = true) {
-  reports(groupBy: $groupBy, filters: $filters, sortBy: sum_expense, fillEmptyValues: $fillEmptyValues) {
-    groupBy {
-      date
-      ...ReportsCategoryFields @include(if: $includeCategory)
-      __typename
+const RECAP_QUERY = `query ($startDate: Date!, $endDate: Date!) {
+  recap(startDate: $startDate, endDate: $endDate) {
+    id
+    dateRangeStart
+    dateRangeEnd
+    summary
+    sentiment
+    createdAt
+    updatedAt
+    cards {
+      module
+      title
+      headline
+      message
+      sentiment
+      metrics
+      richBlocks
+      titleMarkdown
+      headlineMarkdown
+      messageMarkdown
     }
-    summary { ...ReportsSummaryFields __typename }
-    __typename
-  }
-  aggregates(filters: $filters, fillEmptyValues: $fillEmptyValues) {
-    summary { ...ReportsSummaryFields __typename }
-    __typename
-  }
-}
-fragment ReportsCategoryFields on ReportsGroupByData { category { id name icon group { id name type __typename } __typename } __typename }
-fragment ReportsSummaryFields on TransactionsSummary { sum avg count max sumIncome sumExpense savings savingsRate first last __typename }`;
-
-const REVIEW_QUERY = `query Common_GetReviewSummaryByUser {
-  byNeedsReviewByUser: aggregates(
-    groupBy: ["needsReviewByUser"]
-    filters: {needsReview: true, transactionVisibility: all_transactions}
-  ) {
-    groupBy { needsReviewByUser { id name __typename } __typename }
-    summary { count __typename }
-    __typename
   }
 }`;
 
 export const recapCommand = new Command('recap')
-  .description('Weekly financial recap (cashflow summary, top categories, pending reviews)')
-  .option('--start <date>', 'Start date (YYYY-MM-DD, default: 7 days ago)')
-  .option('--end <date>', 'End date (YYYY-MM-DD, default: today)')
+  .description('AI-generated weekly financial recap')
+  .requiredOption('--start <date>', 'Start date (YYYY-MM-DD)')
+  .requiredOption('--end <date>', 'End date (YYYY-MM-DD)')
   .action(async (options) => {
     try {
-      const now = new Date();
-      const weekAgo = new Date(now);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      const startDate = options.start || weekAgo.toISOString().slice(0, 10);
-      const endDate = options.end || now.toISOString().slice(0, 10);
-
-      const filters = { startDate, endDate, categoryType: 'expense', transactionVisibility: 'non_hidden_transactions_only' };
-
-      const [cashflow, reports, review] = await Promise.all([
-        runGraphQL(CASHFLOW_QUERY, { filters: { startDate, endDate } }),
-        runGraphQL(REPORTS_SUMMARY_QUERY, {
-          filters,
-          groupBy: ['category'],
-          includeCategory: true,
-          includeCategoryGroup: false,
-          includeMerchant: false,
-          includeBusinessEntity: false,
-          includeBudgetVariability: false,
-          fillEmptyValues: true,
-        }),
-        runGraphQL(REVIEW_QUERY),
-      ]);
-
-      const recap = {
-        period: { startDate, endDate },
-        cashflow: cashflow,
-        topCategories: reports,
-        pendingReview: review,
-      };
-
-      console.log(JSON.stringify(recap, null, 2));
+      const data = await runGraphQL(RECAP_QUERY, {
+        startDate: options.start,
+        endDate: options.end,
+      });
+      console.log(JSON.stringify(data, null, 2));
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : String(error));
       process.exit(1);

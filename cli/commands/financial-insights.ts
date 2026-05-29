@@ -29,32 +29,45 @@ async function runGraphQL(query: string, variables?: Record<string, any>): Promi
   return json.data;
 }
 
-const FINANCIAL_INSIGHTS_QUERY = `query GetFinancialInsights($status: String) {
-  financialInsights(status: $status) {
+const FINANCIAL_INSIGHTS_QUERY = `query {
+  financialInsights(statuses: [new, accepted, in_progress]) {
     id
-    status
-    title
+    merchantNameDisplay
+    merchantLogoUrl
+    dashboardSubtitle
     description
     reasoning
-    merchant { id name __typename }
-    category { id name __typename }
-    savingsEstimate
-    actionType
-    createdAt
-    updatedAt
-    __typename
+    effort
+    status
+    savingsEstimateLow
+    savingsEstimateHigh
+    capturedSavingsLow
+    currentAnnualCost
+    recurringStreamSnapshot
+    nextChargeDate
+    score
+    opportunityType
+    suggestedActionType
+    relatedMerchants { name logoUrl merchantId }
+  }
+  financialInsightSummary {
+    totalCapturedSavings
+    completedCount
+    totalIdentifiedSavingsLow
+    totalIdentifiedSavingsHigh
+    acceptedCount
+    inProgressCount
+    newCount
   }
 }`;
 
 export const financialInsightsCommand = new Command('financial-insights')
   .alias('fi')
   .description('Financial insights (merchant spending, savings opportunities)')
-  .option('--status <status>', 'Filter by status (new|accepted|in_progress|dismissed)')
-  .action(async (options) => {
+  .description('Financial insights (merchant spending, savings opportunities)')
+  .action(async () => {
     try {
-      const variables: Record<string, any> = {};
-      if (options.status) variables.status = options.status;
-      const data = await runGraphQL(FINANCIAL_INSIGHTS_QUERY, variables);
+      const data = await runGraphQL(FINANCIAL_INSIGHTS_QUERY);
       console.log(JSON.stringify(data, null, 2));
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : String(error));

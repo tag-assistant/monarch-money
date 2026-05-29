@@ -29,14 +29,15 @@ async function runGraphQL(query: string, variables?: Record<string, any>): Promi
   return json.data;
 }
 
-const SCHEDULE_C_QUERY = `query GetScheduleC($year: Int!) {
-  scheduleCLineItems(year: $year) {
-    id
+const SCHEDULE_C_QUERY = `query ($taxYear: Int!) {
+  scheduleCLineItems(taxYear: $taxYear) {
+    key
     lineNumber
     description
-    amount
-    category { id name __typename }
-    __typename
+    lineType
+    sortOrder
+    isNotTracked
+    displayInfo
   }
 }`;
 
@@ -100,7 +101,7 @@ taxCommand
   .requiredOption('--year <year>', 'Tax year', parseInt)
   .action(async (options) => {
     try {
-      const data = await runGraphQL(SCHEDULE_C_QUERY, { year: options.year });
+      const data = await runGraphQL(SCHEDULE_C_QUERY, { taxYear: options.year });
       console.log(JSON.stringify(data, null, 2));
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : String(error));
