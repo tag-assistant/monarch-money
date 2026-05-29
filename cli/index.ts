@@ -22,6 +22,11 @@ import { portfolioCommand } from './commands/portfolio';
 import { reportsCommand } from './commands/reports';
 import { recapCommand } from './commands/recap';
 import { debtCommand } from './commands/debt';
+import { adviceCommand } from './commands/advice';
+import { financialInsightsCommand } from './commands/financial-insights';
+import { paychecksCommand } from './commands/paychecks';
+import { taxCommand } from './commands/tax';
+import { creditScoreCommand } from './commands/credit-score';
 
 const program = new Command();
 
@@ -52,5 +57,10 @@ program.addCommand(portfolioCommand);
 program.addCommand(reportsCommand);
 program.addCommand(recapCommand);
 program.addCommand(debtCommand);
+program.addCommand(adviceCommand);
+program.addCommand(financialInsightsCommand);
+program.addCommand(paychecksCommand);
+program.addCommand(taxCommand);
+program.addCommand(creditScoreCommand);
 
 program.parse();
