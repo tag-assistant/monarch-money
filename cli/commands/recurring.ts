@@ -52,6 +52,28 @@ recurringCommand
   });
 
 recurringCommand
+  .command('delete <id>')
+  .description('Delete a recurring transaction stream')
+  .option('--yes', 'Confirm deletion')
+  .action(async (id, options) => {
+    if (!options.yes) {
+      printError('Deletion requires --yes flag');
+      process.exit(1);
+    }
+
+    const spinner = ora('Deleting recurring stream...').start();
+    try {
+      const client = await getClient();
+      await client.recurring.deleteRecurringStream(id);
+      spinner.succeed(`Recurring stream ${id} deleted`);
+    } catch (error) {
+      spinner.fail('Failed to delete recurring stream');
+      printError(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+recurringCommand
   .command('upcoming')
   .description('Show upcoming recurring bills')
   .option('--days <days>', 'Number of days to look ahead', '30')

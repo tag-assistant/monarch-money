@@ -80,6 +80,11 @@ export interface RecurringAPI {
    * Mark a recurring stream as not recurring (disable it)
    */
   markStreamAsNotRecurring(streamId: string): Promise<boolean>
+
+  /**
+   * Delete a recurring transaction stream
+   */
+  deleteRecurringStream(streamId: string): Promise<boolean>
 }
 
 export class RecurringAPIImpl implements RecurringAPI {
@@ -203,6 +208,22 @@ export class RecurringAPIImpl implements RecurringAPI {
     }>(query, variables)
 
     return result.recurringTransactionItems
+  }
+
+  async deleteRecurringStream(streamId: string): Promise<boolean> {
+    const mutation = `
+      mutation Common_DeleteRecurringTransactionStream($id: ID!) {
+        deleteRecurringTransactionStream(id: $id) {
+          __typename
+        }
+      }
+    `
+
+    await this.graphql.mutation<{
+      deleteRecurringTransactionStream: { __typename: string }
+    }>(mutation, { id: streamId })
+
+    return true
   }
 
   async markStreamAsNotRecurring(streamId: string): Promise<boolean> {
