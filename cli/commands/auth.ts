@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import ora from 'ora';
 import chalk from 'chalk';
 import fetch from 'node-fetch';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { MonarchClient } from '../../lib';
 import { saveCliConfig, clearCliConfig, loadCliConfig } from '../client';
 import { printSuccess, printError, printInfo } from '../utils/output';
@@ -31,9 +31,10 @@ async function fetchEmailOTP(account: string, waitSeconds: number = 30): Promise
 
   while (Date.now() - startTime < maxWait) {
     try {
-      const result = execSync(
-        `gog gmail search "from:monarch subject:code" --account ${account} --max 1 --plain 2>/dev/null`,
-        { timeout: 15000, encoding: 'utf-8' }
+      const result = execFileSync(
+        'gog',
+        ['gmail', 'search', 'from:monarch subject:code', '--account', account, '--max', '1', '--plain'],
+        { timeout: 15000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
       ).trim();
 
       // Parse the plain output: ID DATE FROM SUBJECT LABELS THREAD
@@ -145,7 +146,7 @@ authCommand
           process.exit(1);
         }
 
-        spinner.text = `Got OTP code ${otpCode}, completing login...`;
+        spinner.text = 'Got OTP code, completing login...';
 
         // Second request with OTP
         loginData.email_otp = otpCode;

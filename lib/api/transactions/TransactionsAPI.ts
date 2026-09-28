@@ -768,24 +768,69 @@ export class TransactionsAPIImpl implements TransactionsAPI {
   }
 
   async getTransactionRules(): Promise<TransactionRule[]> {
+    // Mirrors the current web app's Web_GetTransactionRules operation.
+    // Rules are represented as typed criteria/actions on TransactionRuleV2,
+    // not the legacy name/conditions/actions shape.
     const query = `
-      query GetTransactionRules {
+      query Web_GetTransactionRules {
         transactionRules {
           id
-          name
-          isEnabled
-          priority
-          conditions {
-            field
+          order
+          merchantCriteriaUseOriginalStatement
+          merchantCriteria { operator value }
+          originalStatementCriteria { operator value }
+          merchantNameCriteria { operator value }
+          amountCriteria {
             operator
+            isExpense
             value
+            valueRange { lower upper }
           }
-          actions {
-            type
-            value
+          categoryIds
+          accountIds
+          categories { id name icon }
+          accounts { id displayName icon logoUrl }
+          criteriaOwnerIsJoint
+          criteriaOwnerUserIds
+          criteriaOwnerUsers { id displayName profilePictureUrl }
+          criteriaBusinessEntityIds
+          criteriaBusinessEntityIsUnassigned
+          criteriaBusinessEntities { id name logoUrl color }
+          setMerchantAction { id name }
+          setCategoryAction { id name icon }
+          addTagsAction { id name color }
+          linkGoalAction { id name imageStorageProvider imageStorageProviderId }
+          linkSavingsGoalAction { id name imageStorageProvider imageStorageProviderId }
+          needsReviewByUserAction { id displayName }
+          unassignNeedsReviewByUserAction
+          sendNotificationAction
+          setHideFromReportsAction
+          setLinkToPaydownBudgetAction
+          reviewStatusAction
+          actionSetOwnerIsJoint
+          actionSetOwner { id displayName profilePictureUrl }
+          actionSetBusinessEntity { id name logoUrl color }
+          actionSetBusinessEntityIsUnassigned
+          recentApplicationCount
+          lastAppliedAt
+          splitTransactionsAction {
+            amountType
+            splitsInfo {
+              categoryId
+              merchantName
+              amount
+              goalId
+              savingsGoalId
+              tags
+              hideFromReports
+              reviewStatus
+              needsReviewByUserId
+              ownerUserId
+              ownerIsJoint
+              businessEntityId
+              businessEntityIsUnassigned
+            }
           }
-          createdAt
-          updatedAt
         }
       }
     `

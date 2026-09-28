@@ -17,25 +17,7 @@ rulesCommand
     try {
       const client = await getClient();
 
-      // Try the existing API first, fall back to raw GraphQL
-      let rules: any[];
-      try {
-        rules = await client.transactions.getTransactionRules();
-      } catch {
-        // The existing API query may not match the actual schema.
-        // Try the real Monarch schema (CreateTransactionRuleV2 style)
-        spinner.text = 'Trying alternative rules query...';
-        const gql = (client as any).graphql || (client as any)._graphql;
-        const query = `{ transactionRules { id merchantCriteria { name } categoryAction { id name } sendNotification applyToExistingTransactions createdAt } }`;
-        try {
-          const data = await gql.query(query);
-          rules = data.transactionRules || [];
-        } catch {
-          // Last resort: minimal query
-          const data2 = await gql.query(`{ transactionRules { id } }`);
-          rules = data2.transactionRules || [];
-        }
-      }
+      const rules = await client.transactions.getTransactionRules();
 
       spinner.stop();
 
@@ -51,15 +33,47 @@ rulesCommand
 
       console.log(chalk.bold(`\n${rules.length} rule(s):\n`));
 
+      const describeCriteria = (r: any): string => {
+        const parts: string[] = [];
+        for (const [label, criterion] of [
+          ['merchant', r.merchantCriteria],
+          ['merchant name', r.merchantNameCriteria],
+          ['statement', r.originalStatementCriteria],
+        ] as const) {
+          if (criterion) parts.push(`${label} ${criterion.operator} ${criterion.value}`);
+        }
+        if (r.amountCriteria) {
+          const amount = r.amountCriteria.value ??
+            (r.amountCriteria.valueRange ? `${r.amountCriteria.valueRange.lower ?? ''}–${r.amountCriteria.valueRange.upper ?? ''}` : '');
+          parts.push(`${r.amountCriteria.isExpense ? 'debit' : 'credit'} ${r.amountCriteria.operator} ${amount}`);
+        }
+        if (r.categories?.length) parts.push(`category=${r.categories.map((x: any) => x.name).join('|')}`);
+        if (r.accounts?.length) parts.push(`account=${r.accounts.map((x: any) => x.displayName).join('|')}`);
+        return parts.join('; ') || '-';
+      };
+
+      const describeActions = (r: any): string => {
+        const parts: string[] = [];
+        if (r.setMerchantAction) parts.push(`rename→${r.setMerchantAction.name}`);
+        if (r.setCategoryAction) parts.push(`category→${r.setCategoryAction.name}`);
+        if (r.addTagsAction?.length) parts.push(`tags→${r.addTagsAction.map((x: any) => x.name).join('|')}`);
+        if (r.linkGoalAction) parts.push(`goal→${r.linkGoalAction.name}`);
+        if (r.linkSavingsGoalAction) parts.push(`savings goal→${r.linkSavingsGoalAction.name}`);
+        if (r.setHideFromReportsAction != null) parts.push(`hide=${r.setHideFromReportsAction}`);
+        if (r.reviewStatusAction) parts.push(`review→${r.reviewStatusAction}`);
+        if (r.sendNotificationAction) parts.push('notify');
+        if (r.splitTransactionsAction) parts.push(`split (${r.splitTransactionsAction.splitsInfo?.length || 0})`);
+        return parts.join(', ') || '-';
+      };
+
       printTable(
-        ['ID', 'Name/Merchant', 'Enabled', 'Priority', 'Actions'],
+        ['Order', 'Criteria', 'Actions', 'Applied', 'Last applied'],
         rules.map((r: any) => [
-          r.id,
-          truncate(r.name || r.merchantCriteria?.name || '-', 30),
-          r.isEnabled !== undefined ? (r.isEnabled ? '✓' : '✗') : '-',
-          r.priority ?? '-',
-          r.actions ? r.actions.map((a: any) => `${a.type}→${a.value}`).join(', ') :
-            r.categoryAction ? `category→${r.categoryAction.name}` : '-',
+          r.order ?? '-',
+          truncate(describeCriteria(r), 55),
+          truncate(describeActions(r), 50),
+          r.recentApplicationCount ?? 0,
+          r.lastAppliedAt || '-',
         ])
       );
     } catch (error) {
