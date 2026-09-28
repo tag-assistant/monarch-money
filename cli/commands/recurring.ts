@@ -82,9 +82,13 @@ recurringCommand
     const spinner = ora('Fetching upcoming bills...').start();
     try {
       const client = await getClient();
+      const days = Number(options.days);
+      if (!Number.isInteger(days) || days < 1 || days > 3660) {
+        throw new Error('--days must be an integer between 1 and 3660');
+      }
       const now = new Date();
       const startDate = now.toISOString().split('T')[0];
-      const end = new Date(now.getTime() + parseInt(options.days) * 86400000);
+      const end = new Date(now.getTime() + days * 86400000);
       const endDate = end.toISOString().split('T')[0];
 
       const items = await client.recurring.getUpcomingRecurringItems({ startDate, endDate });
@@ -96,11 +100,11 @@ recurringCommand
       }
 
       if (!items || items.length === 0) {
-        console.log(chalk.yellow(`No upcoming bills in the next ${options.days} days`));
+        console.log(chalk.yellow(`No upcoming bills in the next ${days} days`));
         return;
       }
 
-      console.log(chalk.bold(`\n${items.length} upcoming bill(s) in the next ${options.days} days:\n`));
+      console.log(chalk.bold(`\n${items.length} upcoming bill(s) in the next ${days} days:\n`));
 
       const totalAmount = items.reduce((sum: number, i: any) => sum + Math.abs(i.amount || 0), 0);
 

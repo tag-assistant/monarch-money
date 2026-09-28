@@ -13,13 +13,15 @@ module.exports = {
   projects: [
     {
       displayName: 'unit',
+      preset: 'ts-jest',
+      testEnvironment: 'node',
       testMatch: ['<rootDir>/lib/**/*.test.ts'],
-      testTimeout: 10000
     },
     {
       displayName: 'e2e',
+      preset: 'ts-jest',
+      testEnvironment: 'node',
       testMatch: ['<rootDir>/tests/e2e/**/*.test.ts'],
-      testTimeout: 60000,
       // Run E2E tests serially to avoid rate limits
       maxWorkers: 1
     }

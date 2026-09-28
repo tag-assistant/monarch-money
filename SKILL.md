@@ -1,10 +1,10 @@
 ---
 name: monarch-money
-description: "Austen's primary financial app. TypeScript CLI for Monarch Money — search transactions, manage categories, list accounts/budgets, track spending. Use for ANY finance question: spending analysis, budget checks, transaction lookups, bill tracking, net worth, investment balances."
+description: "Primary personal-finance app. TypeScript CLI for Monarch Money — search transactions, manage categories, list accounts/budgets, track spending. Use for ANY finance question: spending analysis, budget checks, transaction lookups, bill tracking, net worth, investment balances."
 metadata:
-  clawdbot:
+  openclaw:
     requires:
-      env: ["MONARCH_EMAIL", "MONARCH_PASSWORD"]
+      bins: ["monarch-money"]
     install:
       - id: node
         kind: node
@@ -15,43 +15,18 @@ metadata:
 
 # Monarch Money — Primary Finance App
 
-Monarch Money is Austen's **primary financial tool**. All bank accounts, credit cards, investments, loans, and budgets are tracked here. Use this for ANY finance-related question.
+Monarch Money is the user's **primary financial tool**. All bank accounts, credit cards, investments, loans, and budgets are tracked here. Use this for ANY finance-related question.
+
+## Safety and current status
+
+- The official Monarch MCP has been discontinued. This CLI and its raw GraphQL command are the supported access path.
+- Read-only commands are safe to run. Commands such as `tx update/create/delete`, `acc refresh`, `receipts split`, `rules create/delete`, `tags create`, and `graphql mutation` change live financial data and require explicit authorization.
+- Prefer environment variables or the existing `~/.mm/session.json`; do not put passwords, OTPs, or session tokens on command lines or in logs.
 
 ## What's in Monarch
 
-- **30 linked accounts** — Fidelity (401k, individual, Roth IRA, HSA), AMEX (Platinum, Blue Cash, Corporate), Capital One (auto loan, checking, savings, Savor), Chase (Sapphire Preferred, Freedom Unlimited), Robinhood (individual, managed, Roth IRA, trad IRA), USAA, Apple Cash, Venmo, Acorns, Marcus by Goldman Sachs, Wex HSA
-- **Net worth:** ~$712K (investments ~$706K, cash ~$19K, minus ~$13K debt)
-- **Budgets & goals** — monthly tracking across all categories
-- **Transaction history** — 12,839+ transactions since May 2019, searchable
-- **Recurring bills** — auto-detected subscriptions and recurring charges
-- **Credit score** — tracked via Spinwheel partnership
-
-## Account Snapshot (as of Feb 2026)
-
-### Investments ($706K)
-- Fidelity 401(K): $341K | Fidelity Individual: $243K
-- Robinhood Individual: $39K | Fidelity 401(K) Roth: $23K
-- Fidelity Roth IRA: $21K | Fidelity HSA: $15K
-- Robinhood Managed: $15K | Robinhood Roth IRA: $5K
-- Acorns: $3K | Robinhood Traditional IRA: $100
-
-### Cash ($19K)
-- Marcus Savings: $17K | Capital One Checking: $1.2K | Venmo: $408
-
-### Debt ($13K)
-- Capital One Auto Loan: $9.3K (CLA 45)
-- Credit Cards: $3.5K total (AMEX Platinum $2K is the biggest chunk)
-
-### Income
-- GitHub salary: ~$132K/yr + $31.7K ESPP (MSFT)
-- Roommate rent: $1,200/mo
-- Monthly discretionary: ~$11,495/mo
-
-### Key Spending Patterns
-- **Uber Eats:** $450/mo avg, 900+ lifetime orders, $23.5K total since Aug 2022
-- **Restaurants:** Pace ~$1,400/mo (very high)
-- **Groceries:** Low (~$33/mo in Feb) — huge restaurant vs grocery imbalance
-- Heavy Robinhood buy/sell activity inflates gross in/out numbers
+- Linked bank, card, investment, and loan accounts; budgets and goals; searchable transaction history; recurring bills; credit score.
+- Balances and holdings change constantly: always query live instead of relying on notes.
 
 ## Authentication
 
@@ -63,37 +38,28 @@ Sessions stored at `~/.mm/session.json`, last up to 7 days. Most commands reuse 
 # Check if session is still valid
 monarch-money auth status
 
-# If expired, re-login (auto-fetches email OTP from tag@austen.info inbox)
-monarch-money auth login -e tag@austen.info -p "$MONARCH_PASSWORD"
+# If expired, re-login (auto-fetches the email OTP from the MONARCH_EMAIL inbox)
+monarch-money auth login -e "$MONARCH_EMAIL" -p "$MONARCH_PASSWORD"
 ```
 
 ### Login Flow
 
 Monarch uses **email OTP** (not TOTP MFA). The login process:
 1. CLI sends credentials to `api.monarch.com`
-2. Monarch sends a 6-digit code to `tag@austen.info`
+2. Monarch sends a 6-digit code to the account email (`$MONARCH_EMAIL`)
 3. CLI auto-fetches the code via `gog gmail search` and completes login
 
 If auto-fetch fails, provide the OTP manually:
 ```bash
-monarch-money auth login -e tag@austen.info -p "$MONARCH_PASSWORD" --otp 123456
+monarch-money auth login -e "$MONARCH_EMAIL" -p "$MONARCH_PASSWORD" --otp 123456
 ```
 
 ### Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MONARCH_EMAIL` | Yes | `tag@austen.info` |
-| `MONARCH_PASSWORD` | Yes | Stored in local vault (`scripts/vault.sh get monarch-money password`) |
-
-### Credentials
-
-- **Email:** tag@austen.info
-- **Password:** In local vault — `scripts/vault.sh get monarch-money password`
-- **Account type:** Household member (Taggert Stone) in "Austen Stone" household
-- **User ID:** 235319839385912643
-- **Household ID:** 178381781130126291
-- **API URL:** `https://api.monarch.com` (**not** api.monarchmoney.com — that returns 525 SSL errors)
+| `MONARCH_EMAIL` | For login | Monarch account email |
+| `MONARCH_PASSWORD` | For login | Load from your password manager at runtime; never commit it |
 
 ## CLI Commands
 
@@ -151,7 +117,7 @@ monarch-money tx delete <id>
 
 ```bash
 monarch-money cat list              # List all categories
-monarch-money cat list --show-ids   # With IDs (needed for tx update)
+monarch-money cat list              # IDs are included in table/JSON output
 monarch-money cat search "Food"     # Search categories
 ```
 
@@ -175,7 +141,7 @@ monarch-money receipts split <transactionId>       # Split by receipt items
 ### Automated Export Script
 
 ```bash
-# Full export: all transactions → CSV (12,839+ rows, ~1.5MB)
+# Full export: all transactions → CSV (full history)
 node scripts/monarch-export.mjs
 # Output: data/monarch/transactions_YYYY-MM-DD.csv
 
@@ -187,18 +153,18 @@ monarch-money acc list --json 2>/dev/null > data/monarch/accounts_YYYY-MM-DD.jso
 
 For faster analysis, use local exports instead of API calls:
 
-- **Transactions CSV:** `data/monarch/transactions_2026-02-10.csv` — 12,839 rows, May 2019 → Feb 2026
+- **Transactions CSV:** `data/monarch/transactions_YYYY-MM-DD.csv`
   - Columns: Date, Merchant, Category, Category Group, Account, Amount, Pending, Notes, Tags, Transaction ID
   - Negative amounts = spending, positive = income
   - Category Groups: `expense`, `income`, `transfer`
-- **Accounts JSON:** `data/monarch/accounts_2026-02-10.json` — 30 accounts with full details
+- **Accounts JSON:** `data/monarch/accounts_YYYY-MM-DD.json`
 
 ### Quick Analysis Patterns (using local CSV)
 
 ```bash
 # Monthly spending by category for a given month
 node -e "
-const lines = require('fs').readFileSync('data/monarch/transactions_2026-02-10.csv','utf8').split('\n').slice(1);
+const lines = require('fs').readFileSync('data/monarch/transactions_YYYY-MM-DD.csv','utf8').split('\n').slice(1);
 const byCat = {};
 lines.forEach(line => {
   // parse CSV (handle quoted fields)
@@ -219,29 +185,17 @@ monarch-money tx search --merchant "Uber Eats" --start 2025-01-01 --json 2>/dev/
   Object.entries(byMonth).sort().forEach(([m,a])=>console.log(m+': \$'+a.toFixed(2)))"
 ```
 
-### GraphQL API (Direct)
+### GraphQL API
 
-For custom queries beyond what the CLI supports:
+Use the CLI so session tokens never appear in shell history or process arguments:
 
 ```bash
-TOKEN=$(node -e "console.log(JSON.parse(require('fs').readFileSync(require('os').homedir()+'/.mm/session.json','utf8')).token)")
-
-# Inline query (no orderBy — it causes API errors)
-curl -s "https://api.monarch.com/graphql" \
-  -H "Authorization: Token $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"query{allTransactions(filters:{}){totalCount results(offset:0,limit:5){id amount date merchant{name}category{name}account{displayName}}}}"}'
+monarch-money graphql query 'query { me { id } }'
 ```
 
 **Investment holdings query (WITH account breakdown — critical for per-account analysis):**
 ```bash
-# Get all holdings with security details, quantities, values, AND which account holds them
-# This is the KEY query — it shows holdings per account, not just aggregated
-curl -s "https://api.monarch.com/graphql" \
-  -H "Authorization: Token $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"query{aggregateHoldings{edges{node{id security{id name ticker currentPrice type}quantity totalValue holdings{id account{id displayName}}}}}}"}'
-# NOTE: 401(k) pooled trust funds (VANG 500 INDEX TRUST etc) have no ticker — identify by name
+monarch-money portfolio
 ```
 
 **GraphQL quirks:**
@@ -289,7 +243,7 @@ monarch-money tx search --merchant "Uber Eats" --start 2026-01-01
 ```bash
 # Use local CSV for fast multi-month analysis
 node -e "
-const lines = require('fs').readFileSync('data/monarch/transactions_2026-02-10.csv','utf8').split('\n').slice(1);
+const lines = require('fs').readFileSync('data/monarch/transactions_YYYY-MM-DD.csv','utf8').split('\n').slice(1);
 const byMonth = {};
 lines.forEach(line => {
   const parts = []; let inQ=false,cur='';
@@ -313,48 +267,12 @@ monarch-money tx search --start $(date -d '7 days ago' +%Y-%m-%d) --limit 200 --
 # Then analyze with node for category breakdown, net worth, large transactions, etc.
 ```
 
-## Financial Advisor Context
-
-When acting as a personal finance advisor, keep these facts in mind:
-
-### Strengths
-- High net worth for his age ($712K+), mostly investments
-- Diversified across Fidelity, Robinhood, Acorns
-- Low debt ($13K total — auto loan + credit cards)
-- Strong income (~$132K + ESPP + roommate rent)
-- Credit score: 804
-
-### Areas to Improve
-- **Restaurant/delivery spending is extreme** — $450/mo Uber Eats + ~$1,400/mo total restaurants
-- **Grocery spending near zero** — cooking would save hundreds per month
-- **Investment churn** — lots of Robinhood buy/sell activity; assess if this is intentional trading or impulse
-- **Credit card utilization** — AMEX Platinum at $2K is manageable but watch it
-- **Emergency fund** — Marcus savings ($17K) is good but could grow
-
-### Recurring Obligations
-- Auto loan: ~$300-400/mo (Capital One)
-- Credit card autopay across 5+ cards
-- Subscriptions: Xfinity, NordVPN, RuneScape, SoundCloud, etc.
-- Trulieve (medical marijuana)
-
-### Tax Considerations
-- ESPP shares (MSFT) — track holding periods for qualified disposition
-- Multiple brokerage accounts — consolidation opportunity?
-- HSA contributions — max these for triple tax advantage
-- Traditional IRA ($100 at Robinhood) — consider converting to Roth while balance is small
-
 ## Session Expiry & Re-Auth
 
 Sessions last ~7 days. If you get "Not logged in" or "Session expired":
 1. Run `monarch-money auth login` (auto-handles email OTP)
-2. If auto-OTP fails: check `gog gmail search "from:monarch subject:code" --account tag@austen.info --max 1` for the code
+2. If auto-OTP fails: check `gog gmail search "from:monarch subject:code" --account "$MONARCH_EMAIL" --max 1` for the code
 3. Re-run with `--otp <CODE>`
-
-## Cron Jobs
-
-- **Weekly Finance Snapshot** (cron `eeae8b0a`): Sundays 2pm ET — pulls account balances, spending summary, saves to `memory/finance-snapshot-YYYY-MM-DD.md`
-- **Daily Bill Check** (cron `00167d86`): 9:30am ET — checks for unusual charges, upcoming bills
-- Cron agents should use the CLI (not browser) for reliability
 
 ## Data Files
 
@@ -499,4 +417,3 @@ Useful repos to monitor:
 
 - [API.md](references/API.md) — GraphQL API details
 - [TROUBLESHOOTING.md](references/TROUBLESHOOTING.md) — Common issues
-- [Deep Research](../../memory/research/monarch-deep-dive.md) — comprehensive 2026 deep dive

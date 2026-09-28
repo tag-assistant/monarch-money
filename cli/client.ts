@@ -48,7 +48,7 @@ export async function getClient(): Promise<MonarchClient> {
   // Load saved session from ~/.mm/session.json
   const loaded = client.loadSession();
   if (!loaded) {
-    throw new Error('Not logged in. Run: monarch auth login');
+    throw new Error('Not logged in. Run: monarch-money auth login');
   }
   
   return client;

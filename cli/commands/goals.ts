@@ -25,25 +25,20 @@ goalsCommand
           goalsV2 {
             id
             name
-            targetAmount
-            currentAmount
-            targetDate
-            type
-            completedAt
             archivedAt
-            plannedContributions { amount frequency }
-            accountAllocations { account { id displayName } currentBalance }
+            completedAt
+            priority
           }
         }`);
         goals = data.goalsV2 || [];
       } catch {
         // Fallback: try simpler goals query
         try {
-          const data2 = await gql.query(`{ goals { id name targetAmount currentAmount targetDate type status } }`);
+          const data2 = await gql.query(`{ goals { id name } }`);
           goals = data2.goals || [];
         } catch {
           // Last resort: try savingsGoals
-          const data3 = await gql.query(`{ savingsGoals { id name targetAmount currentAmount targetDate } }`);
+          const data3 = await gql.query(`{ savingsGoals { id name } }`);
           goals = data3.savingsGoals || [];
         }
       }
@@ -74,7 +69,7 @@ goalsCommand
             formatCurrency(target),
             formatCurrency(current),
             `${pct}%`,
-            g.targetDate || '-',
+            '-',
           ];
         })
       );
@@ -100,7 +95,7 @@ goalsCommand
       try {
         const data = await gql.query(`query($id: ID!) {
           goalV2(id: $id) {
-            id name targetAmount currentAmount targetDate type completedAt archivedAt
+            id name targetAmount currentAmount type completedAt archivedAt
             plannedContributions { amount frequency startDate }
             accountAllocations { account { id displayName currentBalance } currentBalance targetAmount }
           }
@@ -108,7 +103,7 @@ goalsCommand
         goal = data.goalV2;
       } catch {
         try {
-          const data2 = await gql.query(`query($id: ID!) { goal(id: $id) { id name targetAmount currentAmount targetDate type status } }`, { id });
+          const data2 = await gql.query(`query($id: ID!) { goal(id: $id) { id name targetAmount currentAmount type status } }`, { id });
           goal = data2.goal;
         } catch {
           throw new Error('Goals API not available or goal not found');
@@ -137,7 +132,6 @@ goalsCommand
       console.log(`  ${chalk.cyan('Target:')}      ${formatCurrency(target)}`);
       console.log(`  ${chalk.cyan('Current:')}     ${formatCurrency(current)}`);
       console.log(`  ${chalk.cyan('Progress:')}    ${pct}%`);
-      console.log(`  ${chalk.cyan('Target Date:')} ${goal.targetDate || '-'}`);
       if (goal.type) console.log(`  ${chalk.cyan('Type:')}        ${goal.type}`);
       if (goal.completedAt) console.log(`  ${chalk.cyan('Completed:')}   ${goal.completedAt}`);
 

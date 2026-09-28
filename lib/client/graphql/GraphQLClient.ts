@@ -216,9 +216,11 @@ export class GraphQLClient {
     // Debug: Log response details
     logger.debug(`GraphQL Response: ${response.status} ${response.statusText}`)
 
-    // Get response text first to log it, then handle errors
+    // Never log or embed the raw body: GraphQL responses can contain account,
+    // transaction, and other sensitive financial data. Parse it in memory and
+    // report only bounded metadata on failure.
     const responseText = await response.text()
-    logger.debug('GraphQL Response Body:', responseText)
+    logger.debug('GraphQL Response Body:', { bytes: responseText.length })
 
     if (response.status >= 400) {
       handleHTTPResponse(response)
@@ -228,8 +230,11 @@ export class GraphQLClient {
     try {
       data = JSON.parse(responseText) as GraphQLResponse<T>
     } catch (parseError) {
-      logger.error('Failed to parse GraphQL response as JSON:', parseError)
-      throw new MonarchAPIError(`Invalid JSON response: ${responseText}`)
+      logger.error('Failed to parse GraphQL response as JSON:', {
+        status: response.status,
+        bytes: responseText.length
+      })
+      throw new MonarchAPIError('Invalid JSON response from Monarch', response.status)
     }
 
     if (data.errors && data.errors.length > 0) {

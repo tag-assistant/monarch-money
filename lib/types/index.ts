@@ -175,11 +175,73 @@ export interface TransactionSplit {
 
 export interface TransactionRule {
   id: string
-  conditions: TransactionRuleCondition[]
-  actions: TransactionRuleAction[]
-  applyToExistingTransactions: boolean
-  createdAt: string
-  updatedAt: string
+  order?: number
+  merchantCriteriaUseOriginalStatement?: boolean
+  merchantCriteria?: TransactionRuleTextCriterion | null
+  originalStatementCriteria?: TransactionRuleTextCriterion | null
+  merchantNameCriteria?: TransactionRuleTextCriterion | null
+  amountCriteria?: TransactionRuleAmountCriterion | null
+  categoryIds?: string[]
+  accountIds?: string[]
+  categories?: TransactionRuleEntity[]
+  accounts?: TransactionRuleEntity[]
+  criteriaOwnerIsJoint?: boolean | null
+  criteriaOwnerUserIds?: string[]
+  criteriaOwnerUsers?: TransactionRuleEntity[]
+  criteriaBusinessEntityIds?: string[]
+  criteriaBusinessEntityIsUnassigned?: boolean | null
+  criteriaBusinessEntities?: TransactionRuleEntity[]
+  setMerchantAction?: TransactionRuleEntity | null
+  setCategoryAction?: TransactionRuleEntity | null
+  addTagsAction?: TransactionRuleEntity[]
+  linkGoalAction?: TransactionRuleEntity | null
+  linkSavingsGoalAction?: TransactionRuleEntity | null
+  needsReviewByUserAction?: TransactionRuleEntity | null
+  unassignNeedsReviewByUserAction?: boolean | null
+  sendNotificationAction?: boolean | null
+  setHideFromReportsAction?: boolean | null
+  setLinkToPaydownBudgetAction?: boolean | null
+  reviewStatusAction?: string | null
+  actionSetOwnerIsJoint?: boolean | null
+  actionSetOwner?: TransactionRuleEntity | null
+  actionSetBusinessEntity?: TransactionRuleEntity | null
+  actionSetBusinessEntityIsUnassigned?: boolean | null
+  recentApplicationCount?: number
+  lastAppliedAt?: string | null
+  splitTransactionsAction?: {
+    amountType: string
+    splitsInfo: Array<Record<string, unknown>>
+  } | null
+  /** Legacy fields retained for callers using older Monarch schemas. */
+  conditions?: TransactionRuleCondition[]
+  actions?: TransactionRuleAction[]
+  applyToExistingTransactions?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface TransactionRuleTextCriterion {
+  operator: string
+  value: string
+}
+
+export interface TransactionRuleAmountCriterion {
+  operator: string
+  isExpense: boolean
+  value?: number | null
+  valueRange?: { lower?: number | null; upper?: number | null } | null
+}
+
+export interface TransactionRuleEntity {
+  id: string
+  name?: string
+  displayName?: string
+  icon?: string
+  logoUrl?: string
+  color?: string
+  profilePictureUrl?: string
+  imageStorageProvider?: string
+  imageStorageProviderId?: string
 }
 
 export interface TransactionRuleCondition {

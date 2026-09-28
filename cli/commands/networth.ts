@@ -23,15 +23,16 @@ networthCommand
 
       spinner.stop();
 
-      const assets = accounts.filter((a: any) => (a.currentBalance || 0) > 0);
-      const liabilities = accounts.filter((a: any) => (a.currentBalance || 0) < 0);
+      const includedAccounts = accounts.filter((a: any) => a.includeBalanceInNetWorth !== false);
+      const assets = includedAccounts.filter((a: any) => (a.currentBalance || 0) > 0);
+      const liabilities = includedAccounts.filter((a: any) => (a.currentBalance || 0) < 0);
 
       const totalAssets = assets.reduce((s: number, a: any) => s + (a.currentBalance || 0), 0);
       const totalLiabilities = liabilities.reduce((s: number, a: any) => s + (a.currentBalance || 0), 0);
       const netWorth = totalAssets + totalLiabilities;
 
       if (options.json) {
-        printJSON({ netWorth, totalAssets, totalLiabilities: Math.abs(totalLiabilities), accountCount: accounts.length });
+        printJSON({ netWorth, totalAssets, totalLiabilities: Math.abs(totalLiabilities), accountCount: includedAccounts.length });
         return;
       }
 
@@ -39,7 +40,7 @@ networthCommand
       console.log(`  ${chalk.cyan('Net Worth:')}      ${formatCurrency(netWorth)}`);
       console.log(`  ${chalk.cyan('Total Assets:')}   ${formatCurrency(totalAssets)}`);
       console.log(`  ${chalk.cyan('Liabilities:')}    ${formatCurrency(Math.abs(totalLiabilities))}`);
-      console.log(`  ${chalk.cyan('Accounts:')}       ${accounts.length}`);
+      console.log(`  ${chalk.cyan('Accounts:')}       ${includedAccounts.length}`);
     } catch (error) {
       spinner.fail('Failed to fetch net worth');
       printError(error instanceof Error ? error.message : String(error));
@@ -58,34 +59,20 @@ networthCommand
     try {
       const client = await getClient();
 
-      const months = parseInt(options.months);
-      const endDate = new Date().toISOString().split('T')[0];
-      const startDate = new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-      let history: any[];
-      try {
-        history = await client.insights.getNetWorthHistory({ startDate, endDate });
-      } catch {
-        // Fallback: try direct GraphQL with different query shapes
-        const gql = (client as any).graphql || (client as any)._graphql;
-        try {
-          const data = await gql.query(
-            `query($startDate: Date!, $endDate: Date!) { snapshotsByDateRange(startDate: $startDate, endDate: $endDate) { date netWorth } }`,
-            { startDate, endDate }
-          );
-          history = data.snapshotsByDateRange || [];
-        } catch {
-          // Try accounts snapshot approach
-          const data2 = await gql.query(
-            `query($startDate: Date!, $endDate: Date!) { accountSnapshotsByDateRange(startDate: $startDate, endDate: $endDate) { date totalBalance } }`,
-            { startDate, endDate }
-          );
-          history = (data2.accountSnapshotsByDateRange || []).map((h: any) => ({
-            date: h.date,
-            netWorth: h.totalBalance,
-          }));
-        }
+      const months = Number(options.months);
+      if (!Number.isInteger(months) || months < 1 || months > 1200) {
+        throw new Error('--months must be an integer between 1 and 1200');
       }
+
+      const end = new Date();
+      const start = new Date(end);
+      start.setUTCMonth(start.getUTCMonth() - months);
+      const endDate = end.toISOString().split('T')[0];
+      const startDate = start.toISOString().split('T')[0];
+
+      // Monarch replaced netWorthHistory and the older snapshot fallbacks with
+      // aggregateSnapshots(AggregateSnapshotFilters). Keep one canonical path.
+      const history = await client.accounts.getNetWorthHistory(startDate, endDate);
 
       spinner.stop();
 
