@@ -94,7 +94,12 @@ export class MonarchClient {
       this.config.baseURL,
       this.auth,
       this.cache,
-      this.config.timeout
+      this.config.timeout,
+      {
+        rateLimit: this.config.rateLimit,
+        retries: this.config.retries,
+        retryDelay: this.config.retryDelay
+      }
     )
 
     // Initialize API modules

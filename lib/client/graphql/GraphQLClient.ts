@@ -1,10 +1,12 @@
-import fetch from 'node-fetch'
+import { createHash } from 'crypto'
 import { 
   logger, 
   MonarchGraphQLError, 
   MonarchAPIError,
   handleHTTPResponse, 
-  retryWithBackoff 
+  MonarchNetworkError,
+  MonarchRateLimitError,
+  retryWithBackoff
 } from '../../utils'
 import { GraphQLResponse, GraphQLError } from '../../types'
 import { AuthenticationService } from '../auth'
@@ -17,15 +19,44 @@ export interface GraphQLRequestOptions {
   retries?: number
 }
 
+export interface GraphQLClientRateLimit {
+  /** Max requests started in any rolling 60s window. */
+  requestsPerMinute: number
+  /** Requests allowed back-to-back before minimum spacing applies. */
+  burstLimit: number
+}
+
+export interface GraphQLClientOptions {
+  rateLimit?: Partial<GraphQLClientRateLimit>
+  /** Minimum spacing between requests once the burst allowance is used (ms). */
+  minRequestIntervalMs?: number
+  retries?: number
+  retryDelay?: number
+  fetchImpl?: typeof fetch
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+}
+
+const AUTH_ERROR_CODES = new Set(['UNAUTHENTICATED', 'UNAUTHORIZED', 'FORBIDDEN_AUTH', 'TOKEN_EXPIRED'])
+
 export class GraphQLClient {
   private baseUrl: string
   private auth: AuthenticationService
   private cache?: MultiLevelCache
   private timeout: number
   private lastRequestTime = 0
-  private readonly minRequestInterval = 250 // 250ms for more human-like behavior
-  private readonly burstLimit = 5 // Max requests in burst
+  private readonly minRequestInterval: number
+  private readonly requestsPerMinute: number
+  private readonly burstLimit: number
+  private readonly defaultRetries: number
+  private readonly retryDelay: number
+  private readonly fetchImpl: typeof fetch
+  private readonly sleep: (ms: number) => Promise<void>
+  private readonly now: () => number
   private requestTimes: number[] = []
+  // Serializes rate-limit slot reservation so concurrent callers can't all
+  // read the same window state and burst past the limit together.
+  private rateLimitChain: Promise<void> = Promise.resolve()
   
   // Enhanced performance features
   private requestDeduplication = new Map<string, Promise<unknown>>()
@@ -38,12 +69,21 @@ export class GraphQLClient {
     baseUrl: string,
     auth: AuthenticationService,
     cache?: MultiLevelCache,
-    timeout: number = 30000
+    timeout: number = 30000,
+    options: GraphQLClientOptions = {}
   ) {
     this.baseUrl = `${baseUrl}/graphql`
     this.auth = auth
     this.cache = cache
     this.timeout = timeout
+    this.requestsPerMinute = Math.max(1, options.rateLimit?.requestsPerMinute ?? 60)
+    this.burstLimit = Math.max(1, options.rateLimit?.burstLimit ?? 10)
+    this.minRequestInterval = Math.max(0, options.minRequestIntervalMs ?? 250)
+    this.defaultRetries = Math.max(0, options.retries ?? 3)
+    this.retryDelay = Math.max(0, options.retryDelay ?? 1000)
+    this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args))
+    this.sleep = options.sleep ?? ((ms) => new Promise(resolve => setTimeout(resolve, ms)))
+    this.now = options.now ?? (() => Date.now())
   }
 
   async query<T = unknown>(
@@ -55,7 +95,7 @@ export class GraphQLClient {
       cache = true,
       cacheTTL,
       timeout = this.timeout,
-      retries = 3
+      retries = this.defaultRetries
     } = options
 
     // Generate cache key
@@ -82,7 +122,7 @@ export class GraphQLClient {
     const requestPromise = this.executeWithQueue<T>(async () => {
       return retryWithBackoff(async () => {
         return this.executeQuery<T>(query, variables, timeout)
-      }, retries)
+      }, retries, this.retryDelay)
     })
 
     this.requestDeduplication.set(deduplicationKey, requestPromise)
@@ -108,13 +148,20 @@ export class GraphQLClient {
     variables?: Record<string, unknown>,
     options: GraphQLRequestOptions = {}
   ): Promise<T> {
-    const { timeout = this.timeout, retries = 3 } = options
+    const { timeout = this.timeout, retries = this.defaultRetries } = options
 
-    // Execute mutation with queue management
+    // Mutations are not idempotent. Only retry when the server explicitly
+    // rejected the request with 429 (it was not applied). Network errors,
+    // timeouts, and 5xx may have been applied server-side, so never replay them.
     const result = await this.executeWithQueue<T>(async () => {
       return retryWithBackoff(async () => {
-        return this.executeQuery<T>(mutation, variables, timeout)
-      }, retries)
+        try {
+          return await this.executeQuery<T>(mutation, variables, timeout)
+        } catch (error) {
+          if (error instanceof MonarchRateLimitError) throw error
+          throw GraphQLClient.nonRetryable(error)
+        }
+      }, retries, this.retryDelay)
     })
 
     // Invalidate related cache entries for mutations
@@ -125,44 +172,85 @@ export class GraphQLClient {
     return result
   }
 
-  private async rateLimit(): Promise<void> {
-    const now = Date.now()
-    
-    // Clean old request times (older than 1 minute)
-    this.requestTimes = this.requestTimes.filter(time => now - time < 60000)
-    
-    // Check burst limit - if we've made too many requests recently, wait longer
-    if (this.requestTimes.length >= this.burstLimit) {
-      const oldestRecentRequest = Math.min(...this.requestTimes)
-      const waitTime = 60000 - (now - oldestRecentRequest) + 100 // Wait until burst window resets
-      if (waitTime > 0) {
-        logger.debug(`Rate limit burst protection: waiting ${waitTime}ms`)
-        await new Promise(resolve => setTimeout(resolve, waitTime))
+  /**
+   * Sliding-window limiter: at most `requestsPerMinute` requests start in any
+   * rolling 60s window; the first `burstLimit` recent requests go out without
+   * spacing, after that requests are spaced by `minRequestInterval`.
+   * Reservation is serialized so concurrent callers are counted correctly.
+   */
+  private rateLimit(): Promise<void> {
+    const slot = this.rateLimitChain.then(() => this.reserveSlot())
+    // Keep the chain alive even if a reservation throws.
+    this.rateLimitChain = slot.catch(() => undefined)
+    return slot
+  }
+
+  private async reserveSlot(): Promise<void> {
+    for (;;) {
+      const now = this.now()
+      this.requestTimes = this.requestTimes.filter(time => now - time < 60000)
+
+      let waitTime = 0
+      if (this.requestTimes.length >= this.requestsPerMinute) {
+        waitTime = 60000 - (now - this.requestTimes[0]) + 1
+      } else if (this.requestTimes.length >= this.burstLimit) {
+        waitTime = this.minRequestInterval - (now - this.lastRequestTime)
       }
+
+      if (waitTime <= 0) break
+      logger.debug(`Rate limit: waiting ${waitTime}ms`)
+      await this.sleep(waitTime)
     }
-    
-    // Standard rate limiting
-    const timeSinceLastRequest = now - this.lastRequestTime
-    if (timeSinceLastRequest < this.minRequestInterval) {
-      const sleepTime = this.minRequestInterval - timeSinceLastRequest
-      logger.debug(`Rate limit: waiting ${sleepTime}ms`)
-      await new Promise(resolve => setTimeout(resolve, sleepTime))
-    }
-    
-    // Add some randomness to make it more human-like (±50ms)
-    const jitter = Math.random() * 100 - 50
-    if (jitter > 0) {
-      await new Promise(resolve => setTimeout(resolve, jitter))
-    }
-    
-    this.lastRequestTime = Date.now()
+
+    this.lastRequestTime = this.now()
     this.requestTimes.push(this.lastRequestTime)
+  }
+
+  private buildHeaders(token: string, deviceUuid: string | null): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Token ${token}`,
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Client-Platform': 'web',
+      'Origin': 'https://app.monarchmoney.com',
+      'device-uuid': deviceUuid || 'unknown',
+      'x-cio-client-platform': 'web',
+      'x-cio-site-id': '2598be4aa410159198b2',
+      'x-gist-user-anonymous': 'false'
+    }
+  }
+
+  /** POST with a hard timeout. Transport failures become MonarchNetworkError. */
+  private async post(body: unknown, headers: Record<string, string>, timeout: number): Promise<Response> {
+    try {
+      return await this.fetchImpl(this.baseUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeout)
+      })
+    } catch (error) {
+      const name = (error as Error)?.name
+      if (name === 'TimeoutError' || name === 'AbortError') {
+        throw new MonarchNetworkError(`GraphQL request timed out after ${timeout}ms`)
+      }
+      throw new MonarchNetworkError(`GraphQL request failed: ${(error as Error)?.message ?? 'network error'}`)
+    }
+  }
+
+  private static nonRetryable(error: unknown): Error {
+    if (error instanceof MonarchNetworkError) {
+      // Surface as a non-retryable API error, keeping the message.
+      return new MonarchAPIError(`${error.message} (mutation not retried; it may or may not have been applied)`)
+    }
+    return error as Error
   }
 
   private async executeQuery<T>(
     query: string,
     variables?: Record<string, unknown>,
-    _timeout?: number
+    timeout: number = this.timeout
   ): Promise<T> {
     // Add rate limiting BEFORE the request like Python library
     await this.rateLimit()
@@ -183,21 +271,10 @@ export class GraphQLClient {
       operationName: null // The web UI sends null for operationName when not specified
     }
 
-    const requestHeaders = {
-      'Content-Type': 'application/json',
-      'Authorization': `Token ${token}`,
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
-      'Accept': 'application/json',
-      'Client-Platform': 'web', // Fixed: match Python case exactly
-      'Origin': 'https://app.monarchmoney.com',
-      'device-uuid': deviceUuid || this.auth.getDeviceUuid() || 'unknown',
-      'x-cio-client-platform': 'web',
-      'x-cio-site-id': '2598be4aa410159198b2',
-      'x-gist-user-anonymous': 'false'
-    }
+    const requestHeaders = this.buildHeaders(token, deviceUuid)
 
     // Debug: Log GraphQL request details
-    const safeHeaders = { ...requestHeaders }
+    const safeHeaders: Record<string, string> = { ...requestHeaders }
     if (safeHeaders.Authorization) {
       safeHeaders.Authorization = 'Token ***'
     }
@@ -207,11 +284,7 @@ export class GraphQLClient {
       body: requestBody
     })
 
-    const response = await fetch(this.baseUrl, {
-      method: 'POST',
-      headers: requestHeaders,
-      body: JSON.stringify(requestBody)
-    })
+    const response = await this.post(requestBody, requestHeaders, timeout)
 
     // Debug: Log response details
     logger.debug(`GraphQL Response: ${response.status} ${response.statusText}`)
@@ -222,6 +295,9 @@ export class GraphQLClient {
     const responseText = await response.text()
     logger.debug('GraphQL Response Body:', { bytes: responseText.length })
 
+    if (response.status === 401) {
+      this.auth.deleteSession()
+    }
     if (response.status >= 400) {
       handleHTTPResponse(response)
     }
@@ -252,11 +328,13 @@ export class GraphQLClient {
     const firstError = errors[0]
     const message = firstError.message || 'GraphQL error occurred'
 
-    // Check for authentication errors
-    if (message.toLowerCase().includes('unauthorized') || 
-        message.toLowerCase().includes('authentication') ||
-        message.toLowerCase().includes('token')) {
-      // Clear session and throw auth error
+    // Only treat structured auth error codes as session expiry. Matching words
+    // in free-text messages (e.g. "token") wrongly wiped valid sessions.
+    const isAuthError = errors.some(error => {
+      const code = error.extensions?.code
+      return typeof code === 'string' && AUTH_ERROR_CODES.has(code.toUpperCase())
+    })
+    if (isAuthError) {
       this.auth.deleteSession()
       throw new MonarchAPIError('Authentication failed - session expired', 401)
     }
@@ -272,8 +350,11 @@ export class GraphQLClient {
     operation: string,
     variables?: Record<string, unknown>
   ): string {
-    const operationName = this.extractOperationName(operation) || type
-    
+ // Unnamed operations fall back to a hash of the document so different
+    // anonymous queries never share a cache or in-flight dedup key.
+    const operationName = this.extractOperationName(operation) ||
+      `${type}#${createHash('sha256').update(operation.trim()).digest('hex').slice(0, 16)}`
+
     if (!variables || Object.keys(variables).length === 0) {
       return operationName
     }
@@ -406,25 +487,11 @@ export class GraphQLClient {
       throw new MonarchAPIError('No authentication token available')
     }
 
-    const response = await fetch(this.baseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Token ${token}`,
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Client-Platform': 'web', // Fixed: match Python case exactly
-        'Origin': 'https://app.monarchmoney.com',
-        'device-uuid': deviceUuid || this.auth.getDeviceUuid() || 'unknown',
-        'x-cio-client-platform': 'web',
-        'x-cio-site-id': '2598be4aa410159198b2',
-        'x-gist-user-anonymous': 'false'
-      },
-      body: JSON.stringify({
-        query: query.trim(),
-        variables: variables || {}
-      })
-    })
+    const response = await this.post(
+      { query: query.trim(), variables: variables || {} },
+      this.buildHeaders(token, deviceUuid),
+      this.timeout
+    )
 
     handleHTTPResponse(response)
 
